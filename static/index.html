@@ -583,9 +583,11 @@
             const state = {
                 time: 0,
                 mode: 'idle',        // idle | listening | thinking | speaking
-                micOn: false,
+                micOn: true,         // domyślnie włączony — auto-start przy pierwszym kliknięciu
+                micActive: false,    // czy STT faktycznie działa (wymaga user gesture)
                 sessionId: 'session_' + Date.now(),
                 processing: false,
+                lastHourAnnounced: -1, // ostatnia ogłoszona godzina
             };
 
             // ── Render loop ───────────────────────────────────
@@ -810,13 +812,46 @@
                 }
             }
 
+            // ── Hourly time announcement ─────────────────────
+            function checkHourlyAnnouncement() {
+                const now = new Date();
+                const hour = now.getHours();
+                const minute = now.getMinutes();
+                const second = now.getSeconds();
+
+                // At exactly :00 (within first 3 seconds of the hour), announce once
+                if (minute === 0 && second < 3 && state.lastHourAnnounced !== hour) {
+                    state.lastHourAnnounced = hour;
+                    const timeStr = `${String(hour).padStart(2, '0')}:00`;
+                    const msg = `Jest godzina ${timeStr}.`;
+                    console.log(`🔔 ${msg}`);
+
+                    // Only if not currently processing
+                    if (!state.processing && !audioPlaying) {
+                        // Don't interrupt active conversation, just schedule
+                        addMessage('assistant', `🕐 ${msg}`);
+                        playTTS(msg).catch(e => console.error('Hourly TTS error:', e));
+                    } else {
+                        // Skip if busy — will catch next hour
+                        console.log('   Skipped — busy');
+                    }
+                }
+
+                // Reset flag when minute changes from 0 to 1
+                if (minute > 0 && state.lastHourAnnounced === hour) {
+                    // Keep flag until next hour starts
+                }
+            }
+
+            // Check every second for hourly announcement
+            setInterval(checkHourlyAnnouncement, 1000);
+
             // ── Mic toggle ────────────────────────────────────
             function turnMicOn() {
                 if (!SpeechRecognition) {
                     unsupportedBanner.classList.add('show');
                     return false;
                 }
-                // Check secure context
                 if (!window.isSecureContext) {
                     setStatus('⚠️ mikrofon wymaga HTTPS — odśwież stronę z https://', null);
                     unsupportedBanner.textContent = '⚠️ Mikrofon wymaga HTTPS. Użyj: https://192.172.1.152:8080';
@@ -828,22 +863,24 @@
                 setMode('listening');
                 setStatus('słucham...', 'listening');
                 startRecognition();
+                state.micActive = true;
                 return true;
             }
 
             function turnMicOff() {
                 state.micOn = false;
+                state.micActive = false;
                 stopRecognition();
                 if (silenceTimer) clearTimeout(silenceTimer);
                 if (!state.processing) {
                     setMode('idle');
-                    setStatus('kliknij 🎤 aby włączyć mikrofon', null);
+                    setStatus('mikrofon wyłączony', null);
                 }
             }
 
             micBtn.addEventListener('click', (e) => {
-                e.stopPropagation(); // prevent body autoStart from interfering
-                if (state.micOn) {
+                e.stopPropagation();
+                if (state.micActive) {
                     turnMicOff();
                 } else {
                     turnMicOn();
@@ -870,15 +907,39 @@
             });
 
             // ── Init ──────────────────────────────────────────
-            if (!initRecognition()) {
+            initRecognition();
+
+            if (!SpeechRecognition) {
                 setStatus('⚠️ użyj Chrome/Edge do rozmowy głosowej', null);
             } else if (!window.isSecureContext) {
                 setStatus('⚠️ mikrofon wymaga HTTPS — użyj https://192.172.1.152:8080', null);
                 unsupportedBanner.textContent = '⚠️ Mikrofon wymaga HTTPS. Użyj adresu: https://192.172.1.152:8080';
                 unsupportedBanner.classList.add('show');
             } else {
-                setStatus('kliknij 🎤 aby włączyć mikrofon', null);
+                // Mic is ON by default — show listening state
+                setMode('listening');
+                setStatus('słucham... kliknij gdziekolwiek aby aktywować mikrofon', 'listening');
             }
+
+            // Auto-start mic on first user gesture (required by Chrome)
+            document.body.addEventListener('click', function autoStart() {
+                if (state.micOn && !state.micActive && SpeechRecognition && window.isSecureContext) {
+                    state.micActive = true;
+                    startRecognition();
+                    setStatus('słucham...', 'listening');
+                    console.log('🎤 Mikrofon aktywowany (auto-start)');
+                }
+            }, { once: false });
+
+            // Also auto-start on keypress
+            document.addEventListener('keydown', function autoStartKey() {
+                if (state.micOn && !state.micActive && SpeechRecognition && window.isSecureContext) {
+                    state.micActive = true;
+                    startRecognition();
+                    setStatus('słucham...', 'listening');
+                    console.log('🎤 Mikrofon aktywowany (keypress)');
+                }
+            }, { once: false });
 
             // Log diagnostics
             console.log('%c🔍 Diagnostyka:', 'font-weight:bold;');
@@ -886,6 +947,8 @@
             console.log('  SpeechRecognition:', !!SpeechRecognition);
             console.log('  Protocol:', location.protocol);
             console.log('  Hostname:', location.hostname);
+            console.log('  Mic default: ON (auto-start przy pierwszym kliknięciu)');
+            console.log('  Hourly announcement: aktywny');
 
             requestAnimationFrame(animate);
 
