@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asystentka Zofia</title>
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --accent: #a855f7;
+            --accent2: #6366f1;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            width: 100vw; height: 100vh; overflow: hidden;
+            background: radial-gradient(ellipse at center, #0f0f2e 0%, #0a0a1a 50%, #060612 100%);
+            font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+            display: flex; align-items: center; justify-content: center;
+            user-select: none; -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        canvas {
+            position: absolute; top:0; left:0;
+            width:100%; height:100%; pointer-events: none;
+        }
+
+        /* ── Glow behind orb ─────────────────────────────── */
+        .glow-bg {
+            position: absolute;
+            width: min(60vw, 60vh, 400px); height: min(60vw, 60vh, 400px);
+            border-radius: 50%;
+            background: radial-gradient(circle,
+                rgba(168,85,247,0.15) 0%, rgba(99,102,241,0.08) 40%, transparent 70%);
+            pointer-events: none; z-index:1;
+            animation: breathe 3s ease-in-out infinite;
+            transition: background 0.5s ease;
+        }
+        .glow-bg.listening {
+            background: radial-gradient(circle,
+                rgba(244,114,182,0.28) 0%, rgba(168,85,247,0.18) 40%, transparent 70%);
+            animation: breatheFast 1.5s ease-in-out infinite;
+        }
+        .glow-bg.thinking {
+            background: radial-gradient(circle,
+                rgba(251,191,36,0.22) 0%, rgba(168,85,247,0.14) 40%, transparent 70%);
+        }
+        .glow-bg.speaking {
+            background: radial-gradient(circle,
+                rgba(96,165,250,0.22) 0%, rgba(99,102,241,0.14) 40%, transparent 70%);
+            animation: breatheFast 1.2s ease-in-out infinite;
+        }
+        @keyframes breathe {
+            0%,100% { transform: scale(1); opacity:0.6; }
+            50% { transform: scale(1.15); opacity:1; }
+        }
+        @keyframes breatheFast {
+            0%,100% { transform: scale(1); opacity:0.7; }
+            50% { transform: scale(1.2); opacity:1; }
+        }
+
+        /* ── Mic button ──────────────────────────────────── */
+        .mic-btn-wrap {
+            position: fixed; bottom: 3.5rem; left: 50%; transform: translateX(-50%);
+            z-index: 25;
+        }
+        .mic-btn {
+            width: 80px; height: 80px; border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.15);
+            background: rgba(20,20,40,0.7);
+            color: rgba(255,255,255,0.5); font-size: 2rem; cursor: pointer;
+            backdrop-filter: blur(12px);
+            transition: all 0.35s ease;
+            display: flex; align-items: center; justify-content: center;
+            position: relative;
+        }
+        .mic-btn:hover {
+            border-color: rgba(255,255,255,0.3);
+            color: rgba(255,255,255,0.8);
+        }
+
+        /* Mic ON state */
+        .mic-btn.on {
+            border-color: #f472b6;
+            background: rgba(244,114,182,0.15);
+            color: #f9a8d4;
+            box-shadow: 0 0 40px rgba(244,114,182,0.4), 0 0 80px rgba(244,114,182,0.15);
+            animation: micGlow 1.2s ease-in-out infinite;
+        }
+        @keyframes micGlow {
+            0%,100% { box-shadow: 0 0 30px rgba(244,114,182,0.35), 0 0 60px rgba(244,114,182,0.1); }
+            50% { box-shadow: 0 0 55px rgba(244,114,182,0.55), 0 0 100px rgba(244,114,182,0.25); }
+        }
+
+        /* Pulse rings from mic when ON */
+        .mic-pulse {
+            position: absolute; inset: -8px; border-radius: 50%;
+            border: 2px solid rgba(244,114,182,0.4);
+            pointer-events: none; opacity: 0;
+        }
+        .mic-btn.on .mic-pulse:nth-child(1) { animation: pulseOut 2s ease-out infinite; }
+        .mic-btn.on .mic-pulse:nth-child(2) { animation: pulseOut 2s ease-out 0.6s infinite; }
+        .mic-btn.on .mic-pulse:nth-child(3) { animation: pulseOut 2s ease-out 1.2s infinite; }
+        @keyframes pulseOut {
+            0% { transform: scale(1); opacity: 0.7; }
+            100% { transform: scale(2.2); opacity: 0; }
+        }
+
+        /* Mic states during conversation */
+        .mic-btn.thinking-state {
+            border-color: #fbbf24;
+            box-shadow: 0 0 35px rgba(251,191,36,0.35);
+            animation: none;
+        }
+        .mic-btn.speaking-state {
+            border-color: #60a5fa;
+            box-shadow: 0 0 35px rgba(96,165,250,0.35);
+            animation: none;
+        }
+
+        /* ── Right-side transcript panel ─────────────────── */
+        .chat-panel {
+            position: fixed; right: 0; top: 0; bottom: 0;
+            width: min(340px, 38vw); z-index: 20;
+            background: rgba(10,10,28,0.85);
+            border-left: 1px solid rgba(168,85,247,0.12);
+            backdrop-filter: blur(12px);
+            display: flex; flex-direction: column;
+            transition: transform 0.35s ease, opacity 0.35s ease;
+        }
+        .chat-panel-header {
+            padding: 14px 18px;
+            border-bottom: 1px solid rgba(168,85,247,0.1);
+            font-size: 0.8rem; color: rgba(255,255,255,0.35);
+            letter-spacing: 0.08em; text-transform: uppercase;
+            display: flex; justify-content: space-between; align-items: center;
+            flex-shrink: 0;
+        }
+        .chat-panel-clear {
+            background: none; border: 1px solid rgba(255,255,255,0.1);
+            color: rgba(255,255,255,0.25); border-radius: 16px;
+            padding: 4px 12px; font-size: 0.7rem; cursor: pointer;
+            font-family: inherit; transition: all 0.2s;
+        }
+        .chat-panel-clear:hover {
+            border-color: rgba(255,255,255,0.2);
+            color: rgba(255,255,255,0.5);
+        }
+        .chat-messages {
+            flex: 1; overflow-y: auto; padding: 12px 14px;
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .chat-messages .msg {
+            padding: 8px 14px; border-radius: 16px;
+            font-size: 0.8rem; line-height: 1.45;
+            animation: msgSlide 0.3s ease-out;
+            word-break: break-word;
+        }
+        .msg.user {
+            align-self: flex-end; text-align: right;
+            background: rgba(168,85,247,0.12);
+            border: 1px solid rgba(168,85,247,0.18);
+            color: #d1d5db;
+            margin-left: 24px;
+        }
+        .msg.assistant {
+            align-self: flex-start; text-align: left;
+            background: rgba(99,102,241,0.1);
+            border: 1px solid rgba(99,102,241,0.15);
+            color: #c4b5fd;
+            margin-right: 24px;
+        }
+        .msg.interim {
+            opacity: 0.5; font-style: italic;
+        }
+        @keyframes msgSlide {
+            from { opacity:0; transform: translateX(15px); }
+            to { opacity:1; transform: translateX(0); }
+        }
+        .chat-messages .empty-state {
+            color: rgba(255,255,255,0.15); text-align: center;
+            margin-top: 40%; font-size: 0.85rem; line-height: 1.6;
+        }
+
+        .chat-messages::-webkit-scrollbar { width: 3px; }
+        .chat-messages::-webkit-scrollbar-track { background: transparent; }
+        .chat-messages::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.15); border-radius: 3px; }
+
+        /* ── Status line ─────────────────────────────────── */
+        .status-text {
+            position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%);
+            z-index: 10; font-size: 0.82rem; font-weight: 300;
+            color: rgba(255,255,255,0.4); letter-spacing:0.1em;
+            pointer-events: none; transition: all 0.4s ease;
+            text-align: center;
+        }
+        .status-text.listening { color: rgba(244,114,182,0.95); text-shadow: 0 0 18px rgba(244,114,182,0.3); }
+        .status-text.thinking { color: rgba(251,191,36,0.95); text-shadow: 0 0 18px rgba(251,191,36,0.3); }
+        .status-text.speaking { color: rgba(96,165,250,0.95); text-shadow: 0 0 18px rgba(96,165,250,0.3); }
+
+        /* ── Unsupported banner ──────────────────────────── */
+        .unsupported-banner {
+            position: fixed; top: 1rem; left: 50%; transform: translateX(-50%);
+            z-index: 30; padding: 8px 20px;
+            background: rgba(220,38,38,0.15);
+            border: 1px solid rgba(220,38,38,0.35);
+            border-radius: 50px; color: #fca5a5;
+            font-size: 0.78rem; display: none;
+        }
+        .unsupported-banner.show { display: block; }
+
+        /* ── Mobile responsive ───────────────────────────── */
+        @media (max-width: 680px) {
+            .chat-panel {
+                width: 100vw; right: 0;
+                transform: translateY(calc(100% - 48px));
+                bottom: 0; top: auto;
+                height: 42vh; border-left: none; border-top: 1px solid rgba(168,85,247,0.15);
+                border-radius: 18px 18px 0 0;
+            }
+            .chat-panel.open { transform: translateY(0); }
+            .chat-panel-toggle {
+                display: flex !important;
+            }
+            .mic-btn { width: 68px; height: 68px; font-size: 1.6rem; }
+            .mic-btn-wrap { bottom: 2.5rem; }
+            .status-text { bottom: 0.8rem; font-size: 0.7rem; }
+        }
+
+        .chat-panel-toggle {
+            display: none; width: 100%; justify-content: center;
+            padding: 6px 0; cursor: pointer;
+            color: rgba(255,255,255,0.25); font-size: 0.75rem;
+            letter-spacing: 0.08em;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="glow-bg" id="glowBg"></div>
+    <canvas id="visualizer"></canvas>
+
+    <div class="unsupported-banner" id="unsupportedBanner">
+        ⚠️ Rozpoznawanie mowy wymaga Chrome lub Edge
+    </div>
+
+    <!-- Right-side chat panel -->
+    <aside class="chat-panel" id="chatPanel">
+        <div class="chat-panel-toggle" id="chatPanelToggle">▲ ROZMOWA ▲</div>
+        <div class="chat-panel-header">
+            <span>Rozmowa</span>
+            <button class="chat-panel-clear" id="clearBtn">wyczyść</button>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+            <div class="empty-state">Włącz mikrofon<br>i zacznij mówić</div>
+        </div>
+    </aside>
+
+    <!-- Mic button -->
+    <div class="mic-btn-wrap">
+        <button class="mic-btn" id="micBtn" aria-label="Włącz/wyłącz mikrofon">
+            <span class="mic-pulse"></span>
+            <span class="mic-pulse"></span>
+            <span class="mic-pulse"></span>
+            <span id="micIcon">🎤</span>
+        </button>
+    </div>
+    <div class="status-text" id="status">kliknij 🎤 aby włączyć mikrofon</div>
+
+    <script>
+        (function() {
+            // ── DOM ──────────────────────────────────────────
+            const canvas = document.getElementById('visualizer');
+            const ctx = canvas.getContext('2d');
+            const statusEl = document.getElementById('status');
+            const micBtn = document.getElementById('micBtn');
+            const micIcon = document.getElementById('micIcon');
+            const clearBtn = document.getElementById('clearBtn');
+            const chatMessages = document.getElementById('chatMessages');
+            const chatPanel = document.getElementById('chatPanel');
+            const glowBg = document.getElementById('glowBg');
+            const unsupportedBanner = document.getElementById('unsupportedBanner');
+
+            // ── Canvas sizing ─────────────────────────────────
+            let W, H, cx, cy, orbRadius;
+            function resize() {
+                W = canvas.width = window.innerWidth;
+                H = canvas.height = window.innerHeight;
+                cx = W/2; cy = H/2;
+                orbRadius = Math.min(W,H) * 0.18;
+            }
+            resize();
+            window.addEventListener('resize', () => { resize(); initParticles(); });
+
+            // ── Audio Engine ──────────────────────────────────
+            let audioCtx = null;
+            let analyser = null;
+            let audioSource = null;
+            const NUM_BANDS = 64;
+            const freqData = new Float32Array(NUM_BANDS);
+            let smoothedFreq = new Float32Array(NUM_BANDS);
+            let audioPlaying = false;
+            let audioLevel = 0;
+
+            function initAudioContext() {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 256;
+                    analyser.smoothingTimeConstant = 0.7;
+                    analyser.connect(audioCtx.destination);
+                }
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+            }
+
+            async function playTTS(text) {
+                initAudioContext();
+                const url = `/api/tts?text=${encodeURIComponent(text)}&voice=zofia`;
+                try {
+                    const resp = await fetch(url);
+                    if (!resp.ok) throw new Error(await resp.text());
+                    const arrayBuffer = await resp.arrayBuffer();
+                    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                    if (audioSource) { try { audioSource.stop(); } catch(e) {} }
+                    audioSource = audioCtx.createBufferSource();
+                    audioSource.buffer = audioBuffer;
+                    audioSource.connect(analyser);
+                    analyser.connect(audioCtx.destination);
+                    audioPlaying = true;
+                    audioSource.start(0);
+                    return new Promise((resolve) => {
+                        audioSource.onended = () => {
+                            audioPlaying = false;
+                            audioLevel = 0;
+                            resolve();
+                        };
+                    });
+                } catch (err) {
+                    console.error('TTS error:', err);
+                    audioPlaying = false;
+                    throw err;
+                }
+            }
+
+            function readAnalyserData() {
+                if (!analyser || !audioPlaying) return;
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteFrequencyData(dataArray);
+                const numBins = bufferLength;
+                for (let i = 0; i < NUM_BANDS; i++) {
+                    const t = i / (NUM_BANDS - 1);
+                    const binIdx = Math.floor(Math.pow(t, 1.5) * (numBins - 1));
+                    freqData[i] = dataArray[Math.min(binIdx, numBins - 1)] / 255;
+                }
+                const timeData = new Uint8Array(analyser.fftSize);
+                analyser.getByteTimeDomainData(timeData);
+                let sum = 0;
+                for (let i = 0; i < timeData.length; i++) {
+                    const v = (timeData[i] - 128) / 128;
+                    sum += v * v;
+                }
+                audioLevel = Math.sqrt(sum / timeData.length);
+            }
+
+            function smoothAudioData() {
+                const smoothing = audioPlaying ? 0.45 : 0.08;
+                for (let i = 0; i < NUM_BANDS; i++) {
+                    const target = audioPlaying ? freqData[i] : 0;
+                    smoothedFreq[i] += (target - smoothedFreq[i]) * smoothing;
+                }
+            }
+
+            // ── Particles ─────────────────────────────────────
+            const particles = [];
+            const MAX_PARTICLES = 80;
+            function createParticle() {
+                const angle = Math.random()*Math.PI*2;
+                const dist = orbRadius * (0.8 + Math.random()*2.5);
+                return {
+                    x: cx + Math.cos(angle)*dist,
+                    y: cy + Math.sin(angle)*dist,
+                    angle, baseDist: dist,
+                    size: 0.5 + Math.random()*2.0,
+                    alpha: 0.15 + Math.random()*0.45,
+                    speed: 0.15 + Math.random()*0.5,
+                    phase: Math.random()*Math.PI*2,
+                    color: Math.random()<0.5
+                        ? `hsla(${250+Math.random()*40},80%,${60+Math.random()*30}%,`
+                        : `hsla(${220+Math.random()*30},70%,${55+Math.random()*35}%,`,
+                };
+            }
+            function initParticles() {
+                particles.length = 0;
+                for(let i=0;i<MAX_PARTICLES;i++) particles.push(createParticle());
+            }
+            initParticles();
+
+            function updateParticles(dt) {
+                for(const p of particles) {
+                    p.phase += p.speed*dt;
+                    const offset = audioLevel*40*Math.sin(p.phase*3 + p.angle);
+                    p.angle += (0.15 + audioLevel*0.9)*dt;
+                    const targetDist = p.baseDist + offset;
+                    const curDist = Math.sqrt((p.x-cx)**2 + (p.y-cy)**2);
+                    const newDist = curDist + (targetDist-curDist)*0.08;
+                    p.x = cx + Math.cos(p.angle)*newDist;
+                    p.y = cy + Math.sin(p.angle)*newDist;
+                    if(Math.sqrt((p.x-cx)**2+(p.y-cy)**2) > orbRadius*3.5) {
+                        Object.assign(p, createParticle());
+                    }
+                }
+            }
+            function drawParticles() {
+                for(const p of particles) {
+                    const alpha = p.alpha * (0.5+0.5*audioLevel);
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size+audioLevel*1.5, 0, Math.PI*2);
+                    ctx.fillStyle = p.color+alpha+')';
+                    ctx.fill();
+                }
+            }
+
+            // ── Orb ───────────────────────────────────────────
+            function drawOrb() {
+                const intensity = audioLevel;
+                const breathe = 1 + Math.sin(state.time*0.8)*0.03;
+                const r = orbRadius * breathe * (1 + intensity*0.12);
+
+                let grad = ctx.createRadialGradient(cx,cy,r*0.3, cx,cy,r*2.8);
+                grad.addColorStop(0, `rgba(168,85,247,${0.2+intensity*0.2})`);
+                grad.addColorStop(0.3, `rgba(99,102,241,${0.1+intensity*0.12})`);
+                grad.addColorStop(0.6, 'rgba(59,130,246,0.04)');
+                grad.addColorStop(1, 'transparent');
+                ctx.beginPath(); ctx.arc(cx,cy,r*2.8,0,Math.PI*2); ctx.fillStyle=grad; ctx.fill();
+
+                grad = ctx.createRadialGradient(cx,cy,r*0.5, cx,cy,r*1.6);
+                grad.addColorStop(0, `rgba(139,92,246,${0.3+intensity*0.2})`);
+                grad.addColorStop(0.5, 'rgba(99,102,241,0.15)');
+                grad.addColorStop(1, 'transparent');
+                ctx.beginPath(); ctx.arc(cx,cy,r*1.6,0,Math.PI*2); ctx.fillStyle=grad; ctx.fill();
+
+                grad = ctx.createRadialGradient(cx-r*0.15,cy-r*0.2,r*0.05, cx,cy,r);
+                grad.addColorStop(0, '#ffffff');
+                grad.addColorStop(0.08, '#f5f3ff');
+                grad.addColorStop(0.25, '#c4b5fd');
+                grad.addColorStop(0.5, '#8b5cf6');
+                grad.addColorStop(0.75, '#6366f1');
+                grad.addColorStop(0.9, '#4338ca');
+                grad.addColorStop(1, 'rgba(30,27,75,0.4)');
+                ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=grad; ctx.fill();
+
+                grad = ctx.createRadialGradient(cx-r*0.28,cy-r*0.32,r*0.02, cx-r*0.1,cy-r*0.1,r*0.5);
+                grad.addColorStop(0, 'rgba(255,255,255,0.55)');
+                grad.addColorStop(0.4, 'rgba(255,255,255,0.12)');
+                grad.addColorStop(1, 'transparent');
+                ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=grad; ctx.fill();
+
+                ctx.beginPath(); ctx.arc(cx,cy,r*0.7,0,Math.PI*2);
+                ctx.strokeStyle = `rgba(255,255,255,${0.06+intensity*0.22})`;
+                ctx.lineWidth = 1.5+intensity*2; ctx.stroke();
+
+                if(intensity > 0.15) {
+                    grad = ctx.createRadialGradient(cx,cy,0, cx,cy,r*0.25);
+                    grad.addColorStop(0, `rgba(255,255,255,${intensity*0.5})`);
+                    grad.addColorStop(1, 'transparent');
+                    ctx.beginPath(); ctx.arc(cx,cy,r*0.25,0,Math.PI*2); ctx.fillStyle=grad; ctx.fill();
+                }
+            }
+
+            // ── Circular waveform ─────────────────────────────
+            function drawCircularWaveform() {
+                const intensity = audioLevel;
+                const baseR = orbRadius*1.25;
+                const numPoints = 256;
+                const step = (Math.PI*2)/numPoints;
+                const rings = [
+                    { r:baseR, amp:32, color:'rgba(139,92,246,0.55)', w:2.0 },
+                    { r:baseR*1.08, amp:20, color:'rgba(99,102,241,0.4)', w:1.5 },
+                    { r:baseR*0.92, amp:26, color:'rgba(167,139,250,0.35)', w:1.2 },
+                ];
+                for(const ring of rings) {
+                    ctx.beginPath();
+                    for(let i=0;i<=numPoints;i++) {
+                        const angle = i*step;
+                        const bi = Math.floor((i/numPoints)*NUM_BANDS);
+                        const val = smoothedFreq[bi];
+                        const noise = Math.sin(angle*7+state.time*2.5)*0.15 + Math.sin(angle*13+state.time*3.7)*0.1;
+                        const d = val*ring.amp + noise*ring.amp*0.3;
+                        const rx = cx+Math.cos(angle)*(ring.r+d);
+                        const ry = cy+Math.sin(angle)*(ring.r+d);
+                        i===0 ? ctx.moveTo(rx,ry) : ctx.lineTo(rx,ry);
+                    }
+                    ctx.closePath();
+                    ctx.strokeStyle=ring.color;
+                    ctx.lineWidth=ring.w+intensity*1;
+                    ctx.shadowColor=ring.color;
+                    ctx.shadowBlur=6+intensity*18;
+                    ctx.stroke();
+                    ctx.shadowBlur=0;
+                }
+            }
+
+            // ── Pulse rings ───────────────────────────────────
+            const pulseRings = [];
+            function spawnPulse() {
+                if(audioLevel>0.2 && Math.random()<audioLevel*0.5) {
+                    pulseRings.push({ r:orbRadius*0.9, alpha:0.6*audioLevel, speed:40+Math.random()*100 });
+                }
+                while(pulseRings.length>8) pulseRings.shift();
+            }
+            function updatePulseRings(dt) {
+                for(const r of pulseRings) { r.r+=r.speed*dt; r.alpha*=0.93; }
+                for(let i=pulseRings.length-1;i>=0;i--) {
+                    if(pulseRings[i].alpha<0.01) pulseRings.splice(i,1);
+                }
+            }
+            function drawPulseRings() {
+                for(const r of pulseRings) {
+                    ctx.beginPath(); ctx.arc(cx,cy,r.r,0,Math.PI*2);
+                    ctx.strokeStyle=`rgba(139,92,246,${r.alpha})`; ctx.lineWidth=2; ctx.stroke();
+                    ctx.beginPath(); ctx.arc(cx,cy,r.r,0,Math.PI*2);
+                    ctx.strokeStyle=`rgba(192,132,252,${r.alpha*0.5})`; ctx.lineWidth=6;
+                    ctx.shadowColor=`rgba(139,92,246,${r.alpha})`; ctx.shadowBlur=15; ctx.stroke();
+                    ctx.shadowBlur=0;
+                }
+            }
+
+            // ── Frequency bars ────────────────────────────────
+            function drawCircularBars() {
+                const innerR = orbRadius*1.55;
+                const maxH = orbRadius*0.7;
+                const numBars = 96;
+                const barW = (Math.PI*2*innerR)/numBars*0.55;
+                for(let i=0;i<numBars;i++) {
+                    const angle = (i/numBars)*Math.PI*2 - Math.PI/2;
+                    const bi = Math.floor((i/numBars)*NUM_BANDS);
+                    const val = smoothedFreq[bi];
+                    const barH = val*maxH*(0.6+audioLevel*0.4)+1.5;
+                    const sr = innerR, er = innerR+barH;
+                    const hue = 245+val*35;
+                    const light = 48+val*35;
+                    const alpha = 0.25+val*0.75;
+                    ctx.beginPath();
+                    ctx.moveTo(cx+Math.cos(angle)*sr, cy+Math.sin(angle)*sr);
+                    ctx.lineTo(cx+Math.cos(angle)*er, cy+Math.sin(angle)*er);
+                    ctx.strokeStyle=`hsla(${hue},80%,${light}%,${alpha})`;
+                    ctx.lineWidth=barW; ctx.lineCap='round'; ctx.stroke();
+                }
+            }
+
+            // ── Background dots ───────────────────────────────
+            const bgDots = [];
+            function initBgDots() {
+                bgDots.length=0;
+                for(let i=0;i<40;i++) bgDots.push({
+                    x:Math.random()*W, y:Math.random()*H,
+                    size:0.5+Math.random()*1.5, alpha:0.08+Math.random()*0.2,
+                    sx:(Math.random()-0.5)*8, sy:(Math.random()-0.5)*8,
+                    ts:0.5+Math.random()*2, tp:Math.random()*Math.PI*2,
+                });
+            }
+            initBgDots();
+            function updateBgDots(dt) {
+                for(const d of bgDots) {
+                    d.x+=d.sx*dt; d.y+=d.sy*dt; d.tp+=d.ts*dt;
+                    if(d.x<-20)d.x=W+20; if(d.x>W+20)d.x=-20;
+                    if(d.y<-20)d.y=H+20; if(d.y>H+20)d.y=-20;
+                }
+            }
+            function drawBgDots() {
+                for(const d of bgDots) {
+                    const tw = 0.5+0.5*Math.sin(d.tp);
+                    ctx.beginPath(); ctx.arc(d.x,d.y,d.size,0,Math.PI*2);
+                    ctx.fillStyle=`rgba(139,140,200,${d.alpha*tw*(0.7+0.3*audioLevel)})`;
+                    ctx.fill();
+                }
+            }
+
+            // ── Global state ──────────────────────────────────
+            const state = {
+                time: 0,
+                mode: 'idle',        // idle | listening | thinking | speaking
+                micOn: false,
+                sessionId: 'session_' + Date.now(),
+                processing: false,
+            };
+
+            // ── Render loop ───────────────────────────────────
+            let lastTime = performance.now();
+            function animate(ts) {
+                let dt = (ts-lastTime)/1000;
+                if(dt<=0) dt=0.016; if(dt>0.1) dt=0.1;
+                lastTime=ts; state.time=ts/1000;
+
+                readAnalyserData();
+                smoothAudioData();
+                spawnPulse();
+
+                updateParticles(dt);
+                updatePulseRings(dt);
+                updateBgDots(dt);
+
+                ctx.clearRect(0,0,W,H);
+                drawBgDots();
+                drawPulseRings();
+                drawCircularBars();
+                drawCircularWaveform();
+                drawOrb();
+                drawParticles();
+
+                if(audioLevel>0.05) {
+                    glowBg.style.transform=`scale(${1+audioLevel*0.3})`;
+                    glowBg.style.opacity=0.6+audioLevel*0.4;
+                } else {
+                    glowBg.style.transform=''; glowBg.style.opacity='';
+                }
+
+                requestAnimationFrame(animate);
+            }
+
+            // ── UI helpers ────────────────────────────────────
+            function setStatus(msg, mode) {
+                statusEl.textContent = msg || 'kliknij 🎤 aby włączyć mikrofon';
+                statusEl.className = 'status-text';
+                if (mode) statusEl.classList.add(mode);
+            }
+
+            function setMode(mode) {
+                state.mode = mode;
+                // Mic button state
+                micBtn.className = 'mic-btn';
+                if (state.micOn) micBtn.classList.add('on');
+                if (mode === 'thinking') micBtn.classList.add('thinking-state');
+                if (mode === 'speaking') micBtn.classList.add('speaking-state');
+                // Glow
+                glowBg.className = 'glow-bg';
+                if (mode !== 'idle') glowBg.classList.add(mode);
+                // Icon
+                const icons = { idle: '🎤', listening: '🎤', thinking: '⏳', speaking: '🔊' };
+                micIcon.textContent = icons[mode] || '🎤';
+            }
+
+            function addMessage(role, text, interim=false) {
+                // Remove empty state
+                const emptyState = chatMessages.querySelector('.empty-state');
+                if (emptyState) emptyState.remove();
+
+                if (interim) {
+                    const existing = chatMessages.querySelectorAll(`.msg.${role}.interim`);
+                    existing.forEach(el => el.remove());
+                }
+                const div = document.createElement('div');
+                div.className = `msg ${role}${interim ? ' interim' : ''}`;
+                div.textContent = text;
+                chatMessages.appendChild(div);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                return div;
+            }
+
+            async function clearConversation() {
+                chatMessages.innerHTML = '<div class="empty-state">Włącz mikrofon<br>i zacznij mówić</div>';
+                try {
+                    await fetch(`/api/chat/${state.sessionId}`, { method: 'DELETE' });
+                } catch(e) {}
+                state.sessionId = 'session_' + Date.now();
+            }
+
+            // ── AI Chat ───────────────────────────────────────
+            async function chatWithAI(text) {
+                try {
+                    const resp = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text, session_id: state.sessionId }),
+                    });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({ detail: 'Błąd serwera' }));
+                        throw new Error(err.detail || `HTTP ${resp.status}`);
+                    }
+                    const data = await resp.json();
+                    return data.response;
+                } catch (err) {
+                    console.error('Chat error:', err);
+                    return 'Przepraszam, wystąpił błąd. Spróbuj jeszcze raz.';
+                }
+            }
+
+            // ── Speech Recognition ────────────────────────────
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            let recognition = null;
+            let silenceTimer = null;
+            const SILENCE_TIMEOUT = 1800;
+
+            function initRecognition() {
+                if (!SpeechRecognition) {
+                    unsupportedBanner.classList.add('show');
+                    return false;
+                }
+                recognition = new SpeechRecognition();
+                recognition.lang = 'pl-PL';
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.maxAlternatives = 1;
+
+                recognition.onresult = (event) => {
+                    let interimText = '';
+                    let finalText = '';
+
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const result = event.results[i];
+                        if (result.isFinal) {
+                            finalText += result[0].transcript;
+                        } else {
+                            interimText += result[0].transcript;
+                        }
+                    }
+
+                    if (interimText) {
+                        addMessage('user', interimText, true);
+                    }
+
+                    if (finalText.trim()) {
+                        const existing = chatMessages.querySelectorAll('.msg.user.interim');
+                        existing.forEach(el => el.remove());
+                        addMessage('user', finalText.trim());
+                        processUserInput(finalText.trim());
+                    }
+
+                    if (silenceTimer) clearTimeout(silenceTimer);
+                    silenceTimer = setTimeout(() => {
+                        const interimEl = chatMessages.querySelector('.msg.user.interim');
+                        if (interimEl && interimEl.textContent.trim()) {
+                            const text = interimEl.textContent.trim();
+                            interimEl.remove();
+                            addMessage('user', text);
+                            processUserInput(text);
+                        }
+                    }, SILENCE_TIMEOUT);
+                };
+
+                recognition.onerror = (event) => {
+                    console.error('STT error:', event.error, event.message);
+                    if (event.error === 'not-allowed') {
+                        setStatus('❌ brak dostępu do mikrofonu', null);
+                        turnMicOff();
+                    } else if (event.error === 'no-speech' || event.error === 'aborted') {
+                        // normal, restart if still on
+                    } else {
+                        setStatus(`błąd: ${event.error}`, null);
+                    }
+                };
+
+                recognition.onend = () => {
+                    if (state.micOn && !state.processing) {
+                        try { recognition.start(); } catch(e) {}
+                    }
+                };
+
+                return true;
+            }
+
+            function startRecognition() {
+                if (!recognition) return;
+                try { recognition.start(); } catch(e) {}
+            }
+
+            function stopRecognition() {
+                if (!recognition) return;
+                try { recognition.stop(); } catch(e) {}
+            }
+
+            // ── Dialog flow ────────────────────────────────────
+            async function processUserInput(text) {
+                if (!text || state.processing) return;
+                state.processing = true;
+
+                stopRecognition();
+
+                setMode('thinking');
+                setStatus('myślę...', 'thinking');
+
+                let response;
+                try {
+                    response = await chatWithAI(text);
+                } catch(e) {
+                    response = 'Przepraszam, coś poszło nie tak.';
+                }
+
+                addMessage('assistant', response);
+                setMode('speaking');
+                setStatus('mówię...', 'speaking');
+
+                try {
+                    await playTTS(response);
+                } catch(e) {
+                    console.error('TTS error:', e);
+                }
+
+                state.processing = false;
+                if (state.micOn) {
+                    setMode('listening');
+                    setStatus('słucham...', 'listening');
+                    startRecognition();
+                } else {
+                    setMode('idle');
+                    setStatus('kliknij 🎤 aby włączyć mikrofon', null);
+                }
+            }
+
+            // ── Mic toggle ────────────────────────────────────
+            function turnMicOn() {
+                if (!SpeechRecognition) {
+                    unsupportedBanner.classList.add('show');
+                    return false;
+                }
+                // Check secure context
+                if (!window.isSecureContext) {
+                    setStatus('⚠️ mikrofon wymaga HTTPS — odśwież stronę z https://', null);
+                    unsupportedBanner.textContent = '⚠️ Mikrofon wymaga HTTPS. Użyj: https://192.172.1.152:8080';
+                    unsupportedBanner.classList.add('show');
+                    return false;
+                }
+                state.micOn = true;
+                state.processing = false;
+                setMode('listening');
+                setStatus('słucham...', 'listening');
+                startRecognition();
+                return true;
+            }
+
+            function turnMicOff() {
+                state.micOn = false;
+                stopRecognition();
+                if (silenceTimer) clearTimeout(silenceTimer);
+                if (!state.processing) {
+                    setMode('idle');
+                    setStatus('kliknij 🎤 aby włączyć mikrofon', null);
+                }
+            }
+
+            micBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // prevent body autoStart from interfering
+                if (state.micOn) {
+                    turnMicOff();
+                } else {
+                    turnMicOn();
+                }
+            });
+
+            // ── Clear button ──────────────────────────────────
+            clearBtn.addEventListener('click', clearConversation);
+
+            // ── Keyboard ──────────────────────────────────────
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' && e.target === document.body) {
+                    e.preventDefault();
+                    if (state.micOn) turnMicOff();
+                    else turnMicOn();
+                }
+            });
+
+            // ── Mobile panel toggle ───────────────────────────
+            const chatPanelToggle = document.getElementById('chatPanelToggle');
+            chatPanelToggle.addEventListener('click', () => {
+                chatPanel.classList.toggle('open');
+                chatPanelToggle.textContent = chatPanel.classList.contains('open') ? '▼ ROZMOWA ▼' : '▲ ROZMOWA ▲';
+            });
+
+            // ── Init ──────────────────────────────────────────
+            if (!initRecognition()) {
+                setStatus('⚠️ użyj Chrome/Edge do rozmowy głosowej', null);
+            } else if (!window.isSecureContext) {
+                setStatus('⚠️ mikrofon wymaga HTTPS — użyj https://192.172.1.152:8080', null);
+                unsupportedBanner.textContent = '⚠️ Mikrofon wymaga HTTPS. Użyj adresu: https://192.172.1.152:8080';
+                unsupportedBanner.classList.add('show');
+            } else {
+                setStatus('kliknij 🎤 aby włączyć mikrofon', null);
+            }
+
+            // Log diagnostics
+            console.log('%c🔍 Diagnostyka:', 'font-weight:bold;');
+            console.log('  isSecureContext:', window.isSecureContext);
+            console.log('  SpeechRecognition:', !!SpeechRecognition);
+            console.log('  Protocol:', location.protocol);
+            console.log('  Hostname:', location.hostname);
+
+            requestAnimationFrame(animate);
+
+            console.log('%c🌟 Asystentka Zofia %c| %cKliknij 🎤 i mów!',
+                'font-size:1.2em;','','color:#a78bfa;');
+        })();
+    </script>
+</body>
+</html>

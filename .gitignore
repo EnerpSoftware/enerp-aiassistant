@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+venv/
+
+# Certificates & secrets
+*.key
+*.crt
+*.pem
+*.p12
+.env
+*.secret
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime data
+*.mp3
+*.log
+/tmp/
+
+# Claude Code
+.claude/
+
+# Conversations (user data)
+~/.assistant_conversations/
