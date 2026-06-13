@@ -11,11 +11,11 @@ from server import extract_city, WMO_CODES, WEATHER_KEYWORDS
 
 
 def test_extract_city_default():
-    """No known city → returns Tolin (default)."""
+    """No known city → returns Natolin (default)."""
     name, lat, lon = extract_city("Jaka jest pogoda?")
-    assert name == "Tolin"
-    assert lat == 52.17
-    assert lon == 20.81
+    assert name == "Natolin"
+    assert lat == 52.136393
+    assert lon == 20.622824
 
 
 def test_extract_city_warszawa():

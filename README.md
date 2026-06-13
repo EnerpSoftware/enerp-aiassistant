@@ -13,7 +13,7 @@ Działa jako fizyczny terminal w biurze (komputer z głośnikiem i mikrofonem, p
 | 🔍 **Wyszukiwarka** | DuckDuckGo — newsy, imieniny, wypadki, kursy walut |
 | 💾 **Pamięć trwała** | Konwersacje zapisywane między restartami |
 | 📅 **Świadomość czasu** | AI zna aktualną datę, dzień tygodnia i godzinę |
-| 📍 **Świadomość miejsca** | Domyślna lokalizacja: Tolin koło Pruszkowa, 05-825 |
+| 📍 **Świadomość miejsca** | Domyślna lokalizacja: Natolin 43, 05-825 Natolin |
 
 ## Szybki start
 

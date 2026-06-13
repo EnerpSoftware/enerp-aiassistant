@@ -72,8 +72,8 @@ Odpowiadasz wyłącznie po polsku.
 
 === KONTEKST CZASOWY I MIEJSCE ===
 - Teraz jest: {date_str}, godzina {time_str} (czas polski CEST/UTC+2)
-- Jesteśmy w Polsce, domyślna lokalizacja: Tolin koło Pruszkowa, kod 05-825, woj. mazowieckie
-- Blisko: Warszawa (~20 km), Pruszków (~5 km), trasa S8, A2, DK92
+- Jesteśmy w Polsce, domyślna lokalizacja: Natolin 43, 05-825 Natolin, woj. mazowieckie
+- Blisko: Grodzisk Mazowiecki (~3 km), Milanówek (~4 km), Pruszków (~8 km), trasa A2 (węzeł Brwinów ~5 km), DK719
 - ZAWSZE używaj powyższej daty i czasu — to są prawdziwe, aktualne dane
 
 === ZASADY ===
@@ -103,18 +103,21 @@ WMO_CODES: dict[int, str] = {
 
 # City coordinates (lat, lon)
 CITY_COORDS: dict[str, tuple[float, float]] = {
-    "tolin": (52.17, 20.81),
-    "pruszków": (52.17, 20.80),
-    "pruszkow": (52.17, 20.80),
+    "natolin": (52.136393, 20.622824),
     "warszawa": (52.23, 21.01),
     "warszawie": (52.23, 21.01),
     "warsaw": (52.23, 21.01),
+    "pruszków": (52.17, 20.80),
+    "pruszkow": (52.17, 20.80),
     "ožarów": (52.21, 20.81),
     "ozarow": (52.21, 20.81),
     "ožarowie": (52.21, 20.81),
     "piastów": (52.18, 20.85),
     "piastow": (52.18, 20.85),
     "ursus": (52.19, 20.88),
+    "grodzisk": (52.11, 20.63),
+    "milanówek": (52.12, 20.67),
+    "milanowek": (52.12, 20.67),
     "kraków": (50.06, 19.94),
     "krakow": (50.06, 19.94),
     "wrocław": (51.11, 17.04),
@@ -127,7 +130,7 @@ CITY_COORDS: dict[str, tuple[float, float]] = {
     "lodz": (51.76, 19.46),
 }
 
-DEFAULT_COORDS = (52.17, 20.81)  # Tolin
+DEFAULT_COORDS = (52.136393, 20.622824)  # Natolin 43, 05-825
 
 WEATHER_KEYWORDS = re.compile(
     r'\b(pogoda|pogodę|pogody|temperatura|temperaturę|ciepło|zimno|deszcz|'
@@ -143,7 +146,7 @@ def extract_city(text: str) -> tuple[str, float, float]:
     for name, coords in CITY_COORDS.items():
         if name in text_lower:
             return (name, *coords)
-    return ("Tolin", *DEFAULT_COORDS)
+    return ("Natolin", *DEFAULT_COORDS)
 
 
 async def fetch_weather(lat: float, lon: float) -> str:
