@@ -919,8 +919,20 @@
             document.addEventListener('keydown', (e) => {
                 if (e.code === 'Space' && e.target === document.body) {
                     e.preventDefault();
-                    if (state.micOn) turnMicOff();
+                    if (state.micActive) turnMicOff();
                     else turnMicOn();
+                }
+                // Test key: Ctrl+T → announce current time immediately
+                if (e.code === 'KeyT' && e.ctrlKey && e.target === document.body) {
+                    e.preventDefault();
+                    const now = new Date();
+                    const h = now.getHours();
+                    const m = now.getMinutes();
+                    const timeStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                    const msg = `Test: jest godzina ${timeStr}.`;
+                    console.log('🧪 ' + msg);
+                    addMessage('assistant', `🧪 ${msg}`);
+                    playTTS(msg).catch(err => console.error(err));
                 }
             });
 
