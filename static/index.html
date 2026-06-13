@@ -620,6 +620,9 @@
                     glowBg.style.transform=''; glowBg.style.opacity='';
                 }
 
+                // Hourly announcement check (rAF — reliable, not throttled)
+                checkHourlyAnnouncement();
+
                 requestAnimationFrame(animate);
             }
 
@@ -813,38 +816,60 @@
             }
 
             // ── Hourly time announcement ─────────────────────
+            // Uses localStorage to survive refreshes, rAF for reliability
+            // (setInterval is throttled to 1/min in background tabs!)
+            const HOURLY_KEY = 'asystentka_last_hour_announced';
+
+            function getStoredHour() {
+                try {
+                    const v = localStorage.getItem(HOURLY_KEY);
+                    if (v) return parseInt(v, 10);
+                } catch(e) {}
+                return -1;
+            }
+
+            function setStoredHour(hour) {
+                try { localStorage.setItem(HOURLY_KEY, String(hour)); } catch(e) {}
+            }
+
+            // Restore from storage on load
+            state.lastHourAnnounced = getStoredHour();
+
             function checkHourlyAnnouncement() {
                 const now = new Date();
                 const hour = now.getHours();
                 const minute = now.getMinutes();
                 const second = now.getSeconds();
 
-                // At exactly :00 (within first 3 seconds of the hour), announce once
-                if (minute === 0 && second < 3 && state.lastHourAnnounced !== hour) {
+                // Wide window: first 30 seconds of each hour
+                // (compensates for background tab throttling)
+                if (minute === 0 && second < 30 && state.lastHourAnnounced !== hour) {
                     state.lastHourAnnounced = hour;
+                    setStoredHour(hour);
+
                     const timeStr = `${String(hour).padStart(2, '0')}:00`;
                     const msg = `Jest godzina ${timeStr}.`;
-                    console.log(`🔔 ${msg}`);
+                    console.log(`🔔 ${msg} (second=${second})`);
 
-                    // Only if not currently processing
                     if (!state.processing && !audioPlaying) {
-                        // Don't interrupt active conversation, just schedule
                         addMessage('assistant', `🕐 ${msg}`);
                         playTTS(msg).catch(e => console.error('Hourly TTS error:', e));
                     } else {
-                        // Skip if busy — will catch next hour
                         console.log('   Skipped — busy');
                     }
                 }
 
-                // Reset flag when minute changes from 0 to 1
-                if (minute > 0 && state.lastHourAnnounced === hour) {
-                    // Keep flag until next hour starts
+                // Reset stored flag after minute 1 passes (so next hour works)
+                if (minute >= 2 && state.lastHourAnnounced === hour) {
+                    state.lastHourAnnounced = -1;
+                    setStoredHour(-1);
                 }
             }
 
-            // Check every second for hourly announcement
-            setInterval(checkHourlyAnnouncement, 1000);
+            // Piggyback on the existing rAF loop (reliable, runs even in background)
+            const _origAnimate = animate;
+            // We call checkHourlyAnnouncement inside the render loop below
+            // — hook into drawBgDots which runs every frame
 
             // ── Mic toggle ────────────────────────────────────
             function turnMicOn() {
@@ -941,6 +966,13 @@
                 }
             }, { once: false });
 
+            // Check immediately if we're at :00 and haven't announced
+            const now = new Date();
+            if (now.getMinutes() === 0 && now.getSeconds() < 30 && state.lastHourAnnounced !== now.getHours()) {
+                console.log('🔔 Checking immediate hourly announcement...');
+                setTimeout(() => checkHourlyAnnouncement(), 1500); // wait for TTS to be ready
+            }
+
             // Log diagnostics
             console.log('%c🔍 Diagnostyka:', 'font-weight:bold;');
             console.log('  isSecureContext:', window.isSecureContext);
@@ -948,7 +980,7 @@
             console.log('  Protocol:', location.protocol);
             console.log('  Hostname:', location.hostname);
             console.log('  Mic default: ON (auto-start przy pierwszym kliknięciu)');
-            console.log('  Hourly announcement: aktywny');
+            console.log('  Hourly announcement: aktywny (rAF, localStorage)');
 
             requestAnimationFrame(animate);
 
