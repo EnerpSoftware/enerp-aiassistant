@@ -673,31 +673,11 @@
                 state.sessionId = 'session_' + Date.now();
             }
 
-            // ── AI Chat ───────────────────────────────────────
-            async function chatWithAI(text) {
-                try {
-                    const resp = await fetch('/api/chat', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text, session_id: state.sessionId }),
-                    });
-                    if (!resp.ok) {
-                        const err = await resp.json().catch(() => ({ detail: 'Błąd serwera' }));
-                        throw new Error(err.detail || `HTTP ${resp.status}`);
-                    }
-                    const data = await resp.json();
-                    return data.response;
-                } catch (err) {
-                    console.error('Chat error:', err);
-                    return 'Przepraszam, wystąpił błąd. Spróbuj jeszcze raz.';
-                }
-            }
-
             // ── Speech Recognition ────────────────────────────
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             let recognition = null;
             let silenceTimer = null;
-            const SILENCE_TIMEOUT = 1800;
+            const SILENCE_TIMEOUT = 800;  // szybciej reaguje po zakończeniu mowy
 
             function initRecognition() {
                 if (!SpeechRecognition) {
@@ -777,7 +757,34 @@
                 try { recognition.stop(); } catch(e) {}
             }
 
-            // ── Dialog flow ────────────────────────────────────
+            // ── AI Chat (streaming) ──────────────────────────────
+            async function* streamChat(text) {
+                const resp = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, session_id: state.sessionId }),
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                yield JSON.parse(line.slice(6));
+                            } catch(e) {}
+                        }
+                    }
+                }
+            }
+
+            // ── Dialog flow (streaming) ─────────────────────────
             async function processUserInput(text) {
                 if (!text || state.processing) return;
                 state.processing = true;
@@ -787,21 +794,61 @@
                 setMode('thinking');
                 setStatus('myślę...', 'thinking');
 
-                let response;
-                try {
-                    response = await chatWithAI(text);
-                } catch(e) {
-                    response = 'Przepraszam, coś poszło nie tak.';
+                // Create message placeholder for streaming text
+                const msgEl = addMessage('assistant', '...');
+                let fullResponse = '';
+                let ttsQueue = [];
+                let ttsPlaying = false;
+
+                async function playNextInQueue() {
+                    if (ttsQueue.length === 0) { ttsPlaying = false; return; }
+                    ttsPlaying = true;
+                    const sentence = ttsQueue.shift();
+                    try {
+                        await playTTS(sentence);
+                    } catch(e) {}
+                    await playNextInQueue();
                 }
 
-                addMessage('assistant', response);
-                setMode('speaking');
-                setStatus('mówię...', 'speaking');
-
                 try {
-                    await playTTS(response);
+                    for await (const chunk of streamChat(text)) {
+                        if (chunk.error) {
+                            fullResponse = 'Przepraszam, wystąpił błąd.';
+                            break;
+                        }
+                        if (chunk.done) {
+                            fullResponse = chunk.full_text || fullResponse;
+                            break;
+                        }
+                        if (chunk.partial) {
+                            // Just update display (don't send to TTS)
+                            fullResponse += chunk.partial;
+                            msgEl.textContent = fullResponse || '...';
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+                        if (chunk.text) {
+                            // Complete sentence — send to TTS!
+                            if (chunk.first) {
+                                // First sentence: switch to speaking mode immediately
+                                setMode('speaking');
+                                setStatus('mówię...', 'speaking');
+                            }
+                            ttsQueue.push(chunk.text);
+                            if (!ttsPlaying) playNextInQueue();
+                        }
+                    }
                 } catch(e) {
-                    console.error('TTS error:', e);
+                    console.error('Stream error:', e);
+                    if (!fullResponse) fullResponse = 'Przepraszam, coś poszło nie tak.';
+                }
+
+                // Finalize display
+                msgEl.textContent = fullResponse || 'Przepraszam, spróbuj jeszcze raz.';
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                // Wait for TTS queue to finish
+                while (ttsPlaying || ttsQueue.length > 0) {
+                    await new Promise(r => setTimeout(r, 200));
                 }
 
                 state.processing = false;

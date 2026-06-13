@@ -14,6 +14,7 @@ import asyncio
 from pathlib import Path
 from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import StreamingResponse, Response, JSONResponse
+from fastapi import BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import edge_tts
@@ -500,6 +501,177 @@ async def clear_chat(session_id: str):
     except Exception:
         pass
     return {"status": "ok", "message": "Historia wyczyszczona"}
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: Request):
+    """Streaming endpoint — wysyła odpowiedź AI zdanie po zdaniu (SSE).
+    Frontend zaczyna TTS od razu po pierwszym zdaniu, nie czeka na całość."""
+    if not DS_API_KEY:
+        raise HTTPException(503, "AI nie jest skonfigurowane")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Nieprawidłowy JSON")
+
+    user_text = (body.get("text") or "").strip()
+    session_id = body.get("session_id", "default")
+
+    if not user_text:
+        raise HTTPException(400, "Brak tekstu")
+
+    history = load_conversation(session_id)
+
+    # ── Weather + search (równolegle, nie czekamy) ──────────
+    weather_context = ""
+    search_context = ""
+
+    async def fetch_context():
+        nonlocal weather_context, search_context
+        if WEATHER_KEYWORDS.search(user_text):
+            city_name, lat, lon = extract_city(user_text)
+            weather_context = await fetch_weather(lat, lon)
+        if needs_search(user_text):
+            search_context = await search_web(user_text)
+
+    # Fetch context in background — we'll start streaming ASAP
+    import asyncio as _asyncio
+    ctx_task = _asyncio.create_task(fetch_context())
+
+    # Build initial messages (without context — we'll add it when ready)
+    messages = [{"role": "system", "content": build_system_prompt()}]
+    messages.extend(history)
+    messages.append({"role": "user", "content": user_text})
+
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": DS_API_KEY,
+        "anthropic-version": "2023-06-01",
+    }
+
+    payload = {
+        "model": DS_MODEL,
+        "max_tokens": 768,  # mniej tokenów = szybsza pierwsza odpowiedź
+        "messages": messages,
+        "stream": True,
+    }
+
+    async def event_stream():
+        full_text = ""
+        sentence_buffer = ""
+        sent_first = False
+
+        try:
+            # Wait briefly for context (weather/search) — max 2s
+            try:
+                await _asyncio.wait_for(ctx_task, timeout=2.0)
+            except _asyncio.TimeoutError:
+                pass  # continue without context if slow
+
+            # If we got context, restart with it included
+            if weather_context or search_context:
+                ctx_msg = ""
+                if weather_context:
+                    ctx_msg += f"{weather_context}\n\n"
+                if search_context:
+                    ctx_msg += f"[WYNIKI WYSZUKIWANIA Z INTERNETU:]\n{search_context}\n\nUżyj tych danych."
+                if ctx_msg:
+                    messages.insert(1, {"role": "system", "content": ctx_msg.strip()})
+                    # Rebuild payload with context
+                    payload["messages"] = messages
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{DS_BASE_URL}/v1/messages",
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=60, sock_read=30),
+                ) as resp:
+                    if resp.status != 200:
+                        err = await resp.text()
+                        yield f"data: {json.dumps({'error': f'API error {resp.status}'})}\n\n"
+                        return
+
+                    # Read SSE stream line by line
+                    async for raw_line in resp.content:
+                        line = raw_line.decode("utf-8").strip()
+                        if not line or line.startswith(":"):
+                            continue
+
+                        # Anthropic SSE: "data: {...}"
+                        if line.startswith("data: "):
+                            try:
+                                chunk = json.loads(line[6:])
+                            except json.JSONDecodeError:
+                                continue
+
+                            # Extract text delta
+                            chunk_type = chunk.get("type", "")
+                            text = ""
+
+                            if chunk_type == "content_block_delta":
+                                delta = chunk.get("delta", {})
+                                if isinstance(delta, dict):
+                                    text = delta.get("text", "")
+                            elif chunk_type == "content_block_start":
+                                continue  # metadata, skip
+                            elif chunk_type == "message_stop":
+                                break
+
+                            if text:
+                                full_text += text
+                                sentence_buffer += text
+
+                                # Send sentence when we hit a sentence boundary
+                                boundary = _sentence_boundary(sentence_buffer)
+                                if boundary:
+                                    sentence = sentence_buffer[:boundary].strip()
+                                    sentence_buffer = sentence_buffer[boundary:].lstrip()
+                                    if sentence:
+                                        yield f"data: {json.dumps({'text': sentence, 'first': not sent_first})}\n\n"
+                                        sent_first = True
+
+                                # Also yield partial text for display
+                                yield f"data: {json.dumps({'partial': text})}\n\n"
+
+                    # Flush remaining text
+                    if sentence_buffer.strip():
+                        yield f"data: {json.dumps({'text': sentence_buffer.strip(), 'first': not sent_first})}\n\n"
+
+        except Exception as e:
+            print(f"Stream error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+        # Save conversation
+        if full_text.strip():
+            history.append({"role": "user", "content": user_text})
+            history.append({"role": "assistant", "content": full_text.strip()})
+            save_conversation(session_id, prune_history(history))
+
+        yield f"data: {json.dumps({'done': True, 'full_text': full_text.strip()})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+            "Connection": "keep-alive",
+        },
+    )
+
+
+def _sentence_boundary(text: str) -> int:
+    """Find the end of the first complete sentence in text.
+    Returns position after the boundary, or 0 if no complete sentence."""
+    for i, ch in enumerate(text):
+        if ch in ".!?\n" and i < len(text) - 1:
+            # Check if it's really end-of-sentence (not "np." or "itp.")
+            next_ch = text[i + 1] if i + 1 < len(text) else ""
+            if next_ch in " \n\r" or next_ch.isupper() or next_ch in '"\')»':
+                return i + 1
+    return 0
 
 
 @app.get("/api/search")
