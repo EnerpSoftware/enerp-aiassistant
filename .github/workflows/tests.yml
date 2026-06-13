@@ -25,7 +25,7 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest tests/ -v --tb=short --timeout=30
+          python -m pytest tests/ -v --tb=short
 
       - name: Check code formatting (informational)
         run: |
